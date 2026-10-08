@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d1b24">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>DentaCare | لوحة إدارة عيادة الأسنان</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ========== شاشة تسجيل الدخول ========== -->
+  <div id="auth-screen" class="screen active">
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="logo-box"><i class="fa-solid fa-tooth"></i></div>
+        <h1>أهلاً بك دكتور</h1>
+        <p class="subtitle">سجّل دخولك لإدارة المرضى والمعالجات</p>
+
+        <form id="login-form" novalidate>
+          <label class="field">
+            <span class="field-label">البريد الإلكتروني</span>
+            <span class="input-group has-icon">
+              <i class="fa-solid fa-envelope"></i>
+              <input type="email" id="login-email" placeholder="name@clinic.com" autocomplete="username" inputmode="email" required>
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">كلمة المرور</span>
+            <span class="input-group has-icon has-action">
+              <i class="fa-solid fa-lock"></i>
+              <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required>
+              <button type="button" id="toggle-password" class="input-action" aria-label="إظهار كلمة المرور">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </span>
+          </label>
+
+          <p id="login-error" class="form-error hidden" role="alert"></p>
+
+          <button type="submit" id="login-btn" class="btn btn-primary btn-full btn-lg">
+            <span class="btn-label">تسجيل الدخول</span>
+            <span class="spinner hidden"></span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== شاشة لوحة التحكم ========== -->
+  <div id="dashboard-screen" class="screen">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark"><i class="fa-solid fa-tooth"></i></span>
+        <span class="brand-text">DentaCare</span>
+      </div>
+      <div class="header-actions">
+        <button id="theme-btn" class="icon-btn" aria-label="تغيير المظهر">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+        <button id="logout-btn" class="icon-btn icon-btn-danger" aria-label="تسجيل الخروج">
+          <i class="fa-solid fa-right-from-bracket"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- الإحصائيات -->
+      <section class="stats" aria-label="ملخص">
+        <div class="stat">
+          <span class="stat-icon"><i class="fa-solid fa-users"></i></span>
+          <div>
+            <strong id="stat-total">0</strong>
+            <span>إجمالي المرضى</span>
+          </div>
+        </div>
+        <div class="stat">
+          <span class="stat-icon stat-green"><i class="fa-solid fa-user-plus"></i></span>
+          <div>
+            <strong id="stat-month">0</strong>
+            <span>جدد هذا الشهر</span>
+          </div>
+        </div>
+        <div class="stat">
+          <span class="stat-icon stat-amber"><i class="fa-solid fa-phone"></i></span>
+          <div>
+            <strong id="stat-phone">0</strong>
+            <span>لديهم رقم هاتف</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- شريط البحث -->
+      <div class="toolbar">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="search" id="search-input" placeholder="ابحث باسم المريض أو رقم الهاتف" autocomplete="off">
+          <button type="button" id="search-clear" class="input-action hidden" aria-label="مسح البحث">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <button id="add-patient-btn" class="btn btn-primary btn-add-desktop">
+          <i class="fa-solid fa-user-plus"></i> إضافة مريض
+        </button>
+      </div>
+
+      <!-- قائمة المرضى -->
+      <section>
+        <div class="section-head">
+          <h2>المرضى</h2>
+          <span id="patients-count" class="chip">0</span>
+        </div>
+        <div id="patients-list" class="patients-grid"></div>
+      </section>
+    </main>
+
+    <!-- زر عائم للهاتف -->
+    <button id="fab-add" class="fab" aria-label="إضافة مريض">
+      <i class="fa-solid fa-plus"></i>
+    </button>
+  </div>
+
+  <!-- ========== نافذة إضافة / تعديل مريض ========== -->
+  <div id="patient-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="patient-modal-title">
+    <div class="modal-content">
+      <div class="sheet-handle"></div>
+      <div class="modal-head">
+        <h3 id="patient-modal-title">إضافة مريض جديد</h3>
+        <button type="button" class="icon-btn close-modal" aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <form id="patient-form" novalidate>
+        <input type="hidden" id="patient-id">
+        <label class="field">
+          <span class="field-label">الاسم الكامل</span>
+          <span class="input-group">
+            <input type="text" id="patient-name" placeholder="مثال: أحمد محمد" autocomplete="off" required>
+          </span>
+        </label>
+        <label class="field">
+          <span class="field-label">رقم الهاتف <small>(اختياري)</small></span>
+          <span class="input-group">
+            <input type="tel" id="patient-phone" placeholder="مثال: 0555 123 4567" inputmode="tel" autocomplete="off" dir="ltr" class="ltr-input">
+          </span>
+        </label>
+        <p id="patient-error" class="form-error hidden" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost close-modal">إلغاء</button>
+          <button type="submit" id="patient-save-btn" class="btn btn-primary">
+            <span class="btn-label">حفظ</span>
+            <span class="spinner hidden"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========== نافذة السجل الطبي ========== -->
+  <div id="records-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="records-patient-name">
+    <div class="modal-content modal-large">
+      <div class="sheet-handle"></div>
+      <div class="modal-head">
+        <div class="modal-title-block">
+          <h3 id="records-patient-name">السجل الطبي</h3>
+          <a id="records-patient-phone" class="modal-sub hidden" href="#"></a>
+        </div>
+        <button type="button" class="icon-btn close-modal" aria-label="إغلاق"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- ملخص الحساب -->
+      <div id="records-summary" class="summary hidden"></div>
+
+      <button id="add-record-btn" class="btn btn-primary btn-full">
+        <i class="fa-solid fa-plus"></i> <span>إضافة معالجة</span>
+      </button>
+
+      <!-- نموذج المعالجة -->
+      <form id="record-form" class="record-form hidden" novalidate>
+        <h4 id="record-form-title">معالجة جديدة</h4>
+        <input type="hidden" id="record-id">
+
+        <label class="field">
+          <span class="field-label">نوع المعالجة</span>
+          <span class="input-group">
+            <input type="text" id="treatment-type" list="treatment-suggestions" placeholder="مثال: حشوة ضوئية" autocomplete="off" required>
+          </span>
+          <datalist id="treatment-suggestions">
+            <option value="فحص وكشف">
+            <option value="تنظيف وتلميع">
+            <option value="حشوة ضوئية">
+            <option value="علاج عصب">
+            <option value="خلع سن">
+            <option value="تلبيسة / تاج">
+            <option value="تقويم أسنان">
+            <option value="تبييض أسنان">
+            <option value="زراعة سن">
+          </datalist>
+        </label>
+
+        <div class="form-grid">
+          <label class="field">
+            <span class="field-label">التكلفة</span>
+            <span class="input-group">
+              <input type="number" id="cost" placeholder="0" inputmode="decimal" min="0" step="any" required>
+            </span>
+          </label>
+          <label class="field">
+            <span class="field-label">المدفوع</span>
+            <span class="input-group">
+              <input type="number" id="paid" placeholder="0" inputmode="decimal" min="0" step="any">
+            </span>
+          </label>
+          <label class="field">
+            <span class="field-label">العملة</span>
+            <span class="input-group">
+              <select id="currency">
+                <option value="$">دولار ($)</option>
+                <option value="₺">ليرة تركية (₺)</option>
+                <option value="€">يورو (€)</option>
+                <option value="ل.س">ليرة سورية (ل.س)</option>
+                <option value="د.ع">دينار عراقي (د.ع)</option>
+                <option value="ر.س">ريال سعودي (ر.س)</option>
+              </select>
+            </span>
+          </label>
+          <label class="field">
+            <span class="field-label">موعد المعالجة</span>
+            <span class="input-group">
+              <input type="datetime-local" id="appointment-date" required>
+            </span>
+          </label>
+        </div>
+
+        <label class="field">
+          <span class="field-label">ملاحظات <small>(اختياري)</small></span>
+          <span class="input-group">
+            <textarea id="record-note" rows="3" placeholder="رقم السن، وصف الحالة، تعليمات للمريض..."></textarea>
+          </span>
+        </label>
+
+        <p id="record-error" class="form-error hidden" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" id="record-cancel" class="btn btn-ghost">إلغاء</button>
+          <button type="submit" id="record-save-btn" class="btn btn-primary">
+            <span class="btn-label">حفظ المعالجة</span>
+            <span class="spinner hidden"></span>
+          </button>
+        </div>
+      </form>
+
+      <div class="section-head section-head-sm">
+        <h4>المعالجات السابقة</h4>
+        <span id="records-count" class="chip">0</span>
+      </div>
+      <div id="records-list" class="records-list"></div>
+    </div>
+  </div>
+
+  <!-- ========== نافذة التأكيد ========== -->
+  <div id="confirm-modal" class="modal modal-top" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-content modal-small">
+      <div class="confirm-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <h3 id="confirm-title">تأكيد الحذف</h3>
+      <p id="confirm-message" class="subtitle"></p>
+      <div class="modal-actions">
+        <button type="button" id="confirm-cancel" class="btn btn-ghost">إلغاء</button>
+        <button type="button" id="confirm-ok" class="btn btn-danger">حذف</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- الإشعارات -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <script src="app.js"></script>
+</body>
+</html>
