@@ -99,6 +99,26 @@
         </div>
       </section>
 
+      <!-- جدول المواعيد -->
+      <section class="schedule" aria-label="جدول المواعيد">
+        <div class="schedule-head">
+          <div class="schedule-title">
+            <h2><i class="fa-regular fa-calendar-check"></i> جدول المواعيد</h2>
+            <span id="schedule-count" class="chip">0</span>
+          </div>
+          <div class="schedule-nav">
+            <button id="schedule-prev" class="icon-btn icon-btn-sm" aria-label="اليوم السابق"><i class="fa-solid fa-chevron-right"></i></button>
+            <button id="schedule-today" class="btn btn-ghost btn-sm">اليوم</button>
+            <button id="schedule-next" class="icon-btn icon-btn-sm" aria-label="اليوم التالي"><i class="fa-solid fa-chevron-left"></i></button>
+          </div>
+        </div>
+        <div class="schedule-date-row">
+          <strong id="schedule-date-label"></strong>
+          <input type="date" id="schedule-date" aria-label="اختيار يوم">
+        </div>
+        <div id="schedule-list" class="schedule-list"></div>
+      </section>
+
       <!-- شريط البحث -->
       <div class="toolbar">
         <div class="search-box">
@@ -235,10 +255,13 @@
           <label class="field">
             <span class="field-label">موعد المعالجة</span>
             <span class="input-group">
-              <input type="datetime-local" id="appointment-date" required>
+              <input type="datetime-local" id="appointment-date" step="60" required>
             </span>
           </label>
         </div>
+
+        <!-- تنبيه تعارض المواعيد -->
+        <div id="record-conflict" class="conflict-box hidden" role="alert"></div>
 
         <label class="field">
           <span class="field-label">ملاحظات <small>(اختياري)</small></span>

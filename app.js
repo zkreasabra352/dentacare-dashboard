@@ -17,15 +17,28 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+const TS = firebase.firestore.Timestamp;
+const FV = firebase.firestore.FieldValue;
 
-// ---------- 2. State ----------
+// ---------- 2. Settings ----------
+const APPOINTMENT_GAP_MINUTES = 25;    // أقل فاصل بين موعدين
+
+// ---------- 3. State ----------
 let patientsData = [];
 let currentPatient = null;       // { id, name, phone }
 let recordsData = [];
 let unsubPatients = null;
 let unsubRecords = null;
+let unsubSchedule = null;
 
-// ---------- 3. DOM ----------
+let scheduleDate = startOfDay(new Date());
+let scheduleItems = [];
+let scheduleLoaded = false;
+
+let editingRecord = null;        // { id, originalMinute }
+let liveCheckToken = 0;
+
+// ---------- 4. DOM ----------
 const $ = (id) => document.getElementById(id);
 
 const authScreen = $('auth-screen');
@@ -41,6 +54,9 @@ const searchInput = $('search-input');
 const searchClear = $('search-clear');
 const patientsCount = $('patients-count');
 
+const scheduleList = $('schedule-list');
+const scheduleCount = $('schedule-count');
+
 const patientModal = $('patient-modal');
 const patientForm = $('patient-form');
 const patientError = $('patient-error');
@@ -54,11 +70,12 @@ const addRecordBtn = $('add-record-btn');
 const recordForm = $('record-form');
 const recordError = $('record-error');
 const recordSaveBtn = $('record-save-btn');
+const conflictBox = $('record-conflict');
 
 const confirmModal = $('confirm-modal');
 const toastContainer = $('toast-container');
 
-// ---------- 4. Helpers ----------
+// ---------- 5. Helpers ----------
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -82,9 +99,43 @@ function formatDate(ts) {
   });
 }
 
+function formatTime(date) {
+  return date.toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDateTimeShort(date) {
+  return date.toLocaleString('ar-EG-u-nu-latn', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
 function toLocalInput(date) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toDateInput(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function sameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function roundUpMinutes(date, step = 5) {
+  const ms = step * 60000;
+  return new Date(Math.ceil(date.getTime() / ms) * ms);
+}
+
+function minuteOf(date) {
+  return Math.floor(date.getTime() / 60000);
 }
 
 function getInitial(name) {
@@ -106,6 +157,11 @@ function isNum(v) {
   return typeof v === 'number' && !Number.isNaN(v);
 }
 
+function patientNameById(id) {
+  const p = patientsData.find((x) => x.id === id);
+  return p ? p.name : 'مريض غير معروف';
+}
+
 function setLoading(btn, loading) {
   btn.disabled = loading;
   btn.querySelector('.btn-label').classList.toggle('hidden', loading);
@@ -117,12 +173,30 @@ function showError(el, message) {
   el.classList.remove('hidden');
 }
 
+function showErrorHtml(el, html) {
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
 function hideError(el) {
   el.textContent = '';
   el.classList.add('hidden');
 }
 
-// ---------- 5. Toasts ----------
+// رابط إنشاء الفهرس يأتي داخل رسالة خطأ Firestore
+function indexLinkFromError(error) {
+  const m = ((error && error.message) || '').match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
+  return m ? m[0] : null;
+}
+
+function indexHelpHtml(error) {
+  const link = indexLinkFromError(error);
+  return link
+    ? `يلزم إنشاء فهرس في قاعدة البيانات لمرة واحدة. <a href="${escapeHtml(link)}" target="_blank" rel="noopener">اضغط هنا لإنشائه</a> ثم اضغط Save وانتظر دقيقة إلى أن يكتمل، وبعدها أعد المحاولة.`
+    : 'يلزم إنشاء فهرس (Collection group) للحقل appointment في المجموعة records. راجع التعليمات المرفقة ثم أعد المحاولة.';
+}
+
+// ---------- 6. Toasts ----------
 function showToast(message, type = 'info') {
   const icons = { success: 'fa-circle-check', error: 'fa-circle-exclamation', info: 'fa-circle-info' };
   const toast = document.createElement('div');
@@ -133,10 +207,10 @@ function showToast(message, type = 'info') {
   setTimeout(() => {
     toast.classList.add('leaving');
     setTimeout(() => toast.remove(), 260);
-  }, 3000);
+  }, 3200);
 }
 
-// ---------- 6. Modals ----------
+// ---------- 7. Modals ----------
 function openModal(modal) {
   modal.classList.add('active');
   document.body.classList.add('no-scroll');
@@ -166,7 +240,6 @@ function closeRecordsModal() {
 patientModal.querySelectorAll('.close-modal').forEach((b) => b.addEventListener('click', closePatientModal));
 recordsModal.querySelectorAll('.close-modal').forEach((b) => b.addEventListener('click', closeRecordsModal));
 
-// الإغلاق بالضغط خارج النافذة
 [patientModal, recordsModal].forEach((modal) => {
   modal.addEventListener('mousedown', (e) => {
     if (e.target !== modal) return;
@@ -174,7 +247,6 @@ recordsModal.querySelectorAll('.close-modal').forEach((b) => b.addEventListener(
   });
 });
 
-// الإغلاق بمفتاح Escape
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (confirmModal.classList.contains('active')) { $('confirm-cancel').click(); return; }
@@ -182,7 +254,6 @@ document.addEventListener('keydown', (e) => {
   else if (recordsModal.classList.contains('active')) closeRecordsModal();
 });
 
-// نافذة تأكيد مخصصة (بديل confirm)
 function confirmDialog({ title = 'تأكيد', message = '', okText = 'تأكيد' }) {
   return new Promise((resolve) => {
     $('confirm-title').textContent = title;
@@ -207,7 +278,7 @@ function confirmDialog({ title = 'تأكيد', message = '', okText = 'تأكي�
   });
 }
 
-// ---------- 7. Theme ----------
+// ---------- 8. Theme ----------
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   themeBtn.innerHTML = theme === 'dark'
@@ -229,7 +300,7 @@ themeBtn.addEventListener('click', () => {
   try { localStorage.setItem('denta-theme', next); } catch (e) { /* ignore */ }
 });
 
-// ---------- 8. Authentication ----------
+// ---------- 9. Authentication ----------
 const AUTH_ERRORS = {
   'auth/invalid-email': 'صيغة البريد الإلكتروني غير صحيحة.',
   'auth/user-disabled': 'هذا الحساب معطّل.',
@@ -245,10 +316,15 @@ auth.onAuthStateChanged((user) => {
     authScreen.classList.remove('active');
     dashboardScreen.classList.add('active');
     loadPatientsRealtime();
+    loadSchedule();
   } else {
     if (unsubPatients) { unsubPatients(); unsubPatients = null; }
     if (unsubRecords) { unsubRecords(); unsubRecords = null; }
+    if (unsubSchedule) { unsubSchedule(); unsubSchedule = null; }
     patientsData = [];
+    scheduleItems = [];
+    scheduleLoaded = false;
+    currentPatient = null;
     document.querySelectorAll('.modal.active').forEach((m) => m.classList.remove('active'));
     document.body.classList.remove('no-scroll');
     dashboardScreen.classList.remove('active');
@@ -297,7 +373,7 @@ logoutBtn.addEventListener('click', async () => {
   if (ok) auth.signOut();
 });
 
-// ---------- 9. Patients ----------
+// ---------- 10. Patients ----------
 function showSkeleton() {
   patientsList.innerHTML = '<div class="skeleton"></div>'.repeat(4);
 }
@@ -311,6 +387,7 @@ function loadPatientsRealtime() {
       patientsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       updateStats();
       applyFilter();
+      renderSchedule();   // لتحديث أسماء المرضى في الجدول
     },
     (error) => {
       console.error('Error loading patients:', error);
@@ -401,7 +478,6 @@ function renderPatients(patients, isSearch) {
   }).join('');
 }
 
-// تفويض الأحداث لقائمة المرضى
 patientsList.addEventListener('click', (e) => {
   const actionEl = e.target.closest('[data-action]');
   if (!actionEl) return;
@@ -464,11 +540,7 @@ patientForm.addEventListener('submit', async (e) => {
       await db.collection('patients').doc(id).update({ name, phone });
       showToast('تم تحديث بيانات المريض', 'success');
     } else {
-      await db.collection('patients').add({
-        name,
-        phone,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      await db.collection('patients').add({ name, phone, createdAt: FV.serverTimestamp() });
       showToast('تمت إضافة المريض', 'success');
     }
     closePatientModal();
@@ -483,7 +555,7 @@ patientForm.addEventListener('submit', async (e) => {
 async function deletePatient(patient) {
   const ok = await confirmDialog({
     title: 'حذف المريض',
-    message: `سيتم حذف "${patient.name}" وجميع سجلاته الطبية نهائياً. لا يمكن التراجع عن هذا الإجراء.`,
+    message: `سيتم حذف "${patient.name}" وجميع سجلاته نهائياً. لا يمكن التراجع عن هذا الإجراء.`,
     okText: 'حذف نهائياً'
   });
   if (!ok) return;
@@ -491,15 +563,12 @@ async function deletePatient(patient) {
   try {
     const patientRef = db.collection('patients').doc(patient.id);
     const recordsSnap = await patientRef.collection('records').get();
-
-    // حذف السجلات على دفعات (الحد الأقصى للدفعة 500 عملية)
     const docs = recordsSnap.docs;
     for (let i = 0; i < docs.length; i += 400) {
       const batch = db.batch();
       docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
       await batch.commit();
     }
-
     await patientRef.delete();
     showToast('تم حذف المريض', 'success');
   } catch (error) {
@@ -508,7 +577,234 @@ async function deletePatient(patient) {
   }
 }
 
-// ---------- 10. Medical Records ----------
+// ---------- 11. Schedule (جدول المواعيد) ----------
+function updateScheduleHeader() {
+  const isToday = sameDay(scheduleDate, new Date());
+  const label = scheduleDate.toLocaleDateString('ar-EG-u-nu-latn', {
+    weekday: 'long', day: 'numeric', month: 'long'
+  });
+  $('schedule-date-label').textContent = (isToday ? 'اليوم — ' : '') + label;
+  $('schedule-date').value = toDateInput(scheduleDate);
+}
+
+function loadSchedule() {
+  if (unsubSchedule) unsubSchedule();
+  scheduleLoaded = false;
+  updateScheduleHeader();
+  scheduleList.innerHTML = '<div class="skeleton" style="height:64px"></div>'.repeat(2);
+
+  const start = new Date(scheduleDate);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  unsubSchedule = db.collectionGroup('records')
+    .where('appointment', '>=', TS.fromDate(start))
+    .where('appointment', '<', TS.fromDate(end))
+    .orderBy('appointment', 'asc')
+    .onSnapshot(
+      (snapshot) => {
+        scheduleItems = snapshot.docs.map((d) => ({
+          id: d.id,
+          patientId: d.ref.parent.parent.id,
+          ...d.data()
+        }));
+        scheduleLoaded = true;
+        renderSchedule();
+      },
+      (error) => {
+        console.error('Schedule error:', error);
+        scheduleCount.textContent = '0';
+        scheduleList.innerHTML = error.code === 'failed-precondition'
+          ? `<div class="conflict-box info">${indexHelpHtml(error)}</div>`
+          : '<div class="schedule-empty"><i class="fa-solid fa-cloud-bolt"></i>تعذّر تحميل المواعيد.</div>';
+      }
+    );
+}
+
+function renderSchedule() {
+  if (!scheduleLoaded) return;
+  scheduleCount.textContent = scheduleItems.length;
+
+  if (scheduleItems.length === 0) {
+    scheduleList.innerHTML = `
+      <div class="schedule-empty">
+        <i class="fa-regular fa-calendar"></i>
+        لا توجد مواعيد في هذا اليوم.
+      </div>`;
+    return;
+  }
+
+  const now = Date.now();
+  const isToday = sameDay(scheduleDate, new Date());
+  const nextIndex = isToday
+    ? scheduleItems.findIndex((r) => r.appointment && r.appointment.toMillis() >= now)
+    : -1;
+
+  scheduleList.innerHTML = scheduleItems.map((r, i) => {
+    const start = r.appointment.toDate();
+    const isPast = isToday && r.appointment.toMillis() < now;
+
+    const tags = [];
+    if (i === nextIndex) tags.push('<span class="slot-tag next-tag">التالي</span>');
+    if (isNum(r.cost)) {
+      const due = Math.max(r.cost - (isNum(r.paid) ? r.paid : 0), 0);
+      if (due > 0) tags.push(`<span class="slot-tag due-tag">متبقي ${escapeHtml(formatMoney(due, r.currency))}</span>`);
+    }
+
+    return `
+      <div class="schedule-row ${isPast ? 'past' : ''} ${i === nextIndex ? 'next' : ''}"
+           role="button" tabindex="0" data-patient="${escapeHtml(r.patientId)}">
+        <div class="slot-time">${escapeHtml(formatTime(start))}</div>
+        <div class="slot-body">
+          <h4>${escapeHtml(patientNameById(r.patientId))}</h4>
+          <p>${escapeHtml(r.treatmentType || '')}</p>
+        </div>
+        <div class="slot-side">${tags.join('')}</div>
+      </div>`;
+  }).join('');
+}
+
+function openScheduleRow(row) {
+  const patient = patientsData.find((p) => p.id === row.dataset.patient);
+  if (patient) openRecordsModal(patient);
+  else showToast('لم يتم العثور على المريض', 'error');
+}
+
+scheduleList.addEventListener('click', (e) => {
+  const row = e.target.closest('.schedule-row');
+  if (row) openScheduleRow(row);
+});
+scheduleList.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = e.target.closest('.schedule-row');
+  if (row) { e.preventDefault(); openScheduleRow(row); }
+});
+
+function shiftScheduleDay(delta) {
+  const d = new Date(scheduleDate);
+  d.setDate(d.getDate() + delta);
+  scheduleDate = startOfDay(d);
+  loadSchedule();
+}
+
+$('schedule-prev').addEventListener('click', () => shiftScheduleDay(-1));
+$('schedule-next').addEventListener('click', () => shiftScheduleDay(1));
+$('schedule-today').addEventListener('click', () => { scheduleDate = startOfDay(new Date()); loadSchedule(); });
+$('schedule-date').addEventListener('change', (e) => {
+  if (!e.target.value) return;
+  scheduleDate = startOfDay(new Date(`${e.target.value}T00:00:00`));
+  loadSchedule();
+});
+
+// تحديث علامات "التالي" و"انتهى" كل دقيقة
+setInterval(renderSchedule, 60000);
+
+// ---------- 12. Appointment conflicts (تعارض المواعيد) ----------
+function gapMs() { return APPOINTMENT_GAP_MINUTES * 60000; }
+
+// كل المواعيد (لكل المرضى) التي تبعد أقل من 25 دقيقة عن الوقت المطلوب
+async function queryAppointmentsAround(date, ignore) {
+  const snap = await db.collectionGroup('records')
+    .where('appointment', '>', TS.fromMillis(date.getTime() - gapMs()))
+    .where('appointment', '<', TS.fromMillis(date.getTime() + gapMs()))
+    .get();
+
+  return snap.docs
+    .filter((d) => !(ignore && d.id === ignore.recordId && d.ref.parent.parent.id === ignore.patientId))
+    .map((d) => ({
+      recordId: d.id,
+      patientId: d.ref.parent.parent.id,
+      start: d.data().appointment.toDate(),
+      treatmentType: d.data().treatmentType || ''
+    }));
+}
+
+// أقرب وقت متاح بعد آخر موعد متعارض
+async function findNextFreeSlot(startConflicts, ignore) {
+  let conflicts = startConflicts;
+  for (let i = 0; i < 10; i++) {
+    const last = Math.max(...conflicts.map((c) => c.start.getTime()));
+    const candidate = new Date(Math.ceil((last + gapMs()) / 60000) * 60000);
+    conflicts = await queryAppointmentsAround(candidate, ignore);
+    if (!conflicts.length) return candidate;
+  }
+  return null;
+}
+
+async function checkAppointment(date, ignore) {
+  const conflicts = await queryAppointmentsAround(date, ignore);
+  if (!conflicts.length) return { conflicts: [], suggestion: null };
+  const suggestion = await findNextFreeSlot(conflicts, ignore);
+  return { conflicts, suggestion };
+}
+
+function currentIgnore() {
+  return editingRecord && currentPatient
+    ? { recordId: editingRecord.id, patientId: currentPatient.id }
+    : null;
+}
+
+function renderConflict(conflicts, suggestion) {
+  const items = [...conflicts]
+    .sort((a, b) => a.start - b.start)
+    .map((c) => {
+      const same = currentPatient && c.patientId === currentPatient.id ? ' (نفس المريض)' : '';
+      const treat = c.treatmentType ? ` — ${escapeHtml(c.treatmentType)}` : '';
+      return `<li><i class="fa-regular fa-clock"></i> <b>${escapeHtml(patientNameById(c.patientId))}</b>${same} الساعة ${escapeHtml(formatTime(c.start))}${treat}</li>`;
+    }).join('');
+
+  const suggestBtn = suggestion
+    ? `<button type="button" class="btn btn-primary btn-sm" data-suggest="${toLocalInput(suggestion)}">
+         <i class="fa-regular fa-clock"></i> استخدم أقرب وقت متاح: ${escapeHtml(formatDateTimeShort(suggestion))}
+       </button>`
+    : '';
+
+  conflictBox.classList.remove('info');
+  conflictBox.innerHTML = `
+    <strong><i class="fa-solid fa-triangle-exclamation"></i> هذا الوقت محجوز</strong>
+    <ul>${items}</ul>
+    <span>يجب ترك ${APPOINTMENT_GAP_MINUTES} دقيقة على الأقل بين كل موعدين.</span>
+    ${suggestBtn ? '<br>' + suggestBtn : ''}`;
+  conflictBox.classList.remove('hidden');
+}
+
+function hideConflict() {
+  conflictBox.innerHTML = '';
+  conflictBox.classList.add('hidden');
+}
+
+conflictBox.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-suggest]');
+  if (!btn) return;
+  $('appointment-date').value = btn.dataset.suggest;
+  hideConflict();
+  hideError(recordError);
+  showToast('تم اختيار الوقت المتاح', 'success');
+});
+
+// فحص فوري عند تغيير الموعد (للتنبيه فقط، والمنع الفعلي يتم عند الحفظ)
+async function liveCheck() {
+  const value = $('appointment-date').value;
+  if (!value || !currentPatient) { hideConflict(); return; }
+
+  const date = new Date(value);
+  if (editingRecord && editingRecord.originalMinute === minuteOf(date)) { hideConflict(); return; }
+
+  const token = ++liveCheckToken;
+  try {
+    const res = await checkAppointment(date, currentIgnore());
+    if (token !== liveCheckToken) return;
+    if (res.conflicts.length) renderConflict(res.conflicts, res.suggestion);
+    else hideConflict();
+  } catch (error) {
+    // يُعالَج عند الحفظ
+    console.warn('Live check failed:', error);
+  }
+}
+
+$('appointment-date').addEventListener('change', liveCheck);
+
+// ---------- 13. Medical Records ----------
 function openRecordsModal(patient) {
   currentPatient = { id: patient.id, name: patient.name, phone: patient.phone || '' };
 
@@ -549,7 +845,6 @@ function loadRecords(patientId) {
 }
 
 function renderSummary() {
-  // تجميع المبالغ حسب العملة (للسجلات الجديدة ذات الأرقام فقط)
   const totals = {};
   recordsData.forEach((r) => {
     if (!isNum(r.cost)) return;
@@ -612,7 +907,6 @@ function renderRecords() {
         </div>
         ${badge}`;
     } else {
-      // سجلات قديمة كانت تُحفظ كنص حر
       moneyHtml = `
         <div class="record-legacy">
           <span><strong>التكلفة:</strong> ${escapeHtml(r.cost || 'غير محدد')}</span>
@@ -636,6 +930,7 @@ function renderRecords() {
         ${r.note ? `<div class="record-note">${escapeHtml(r.note)}</div>` : ''}
       </article>`;
   }).join('');
+
 }
 
 recordsList.addEventListener('click', (e) => {
@@ -645,14 +940,23 @@ recordsList.addEventListener('click', (e) => {
   const record = item && recordsData.find((r) => r.id === item.dataset.id);
   if (!record) return;
 
-  if (btn.dataset.action === 'edit-record') showRecordForm(record);
-  else if (btn.dataset.action === 'delete-record') deleteRecord(record);
+  switch (btn.dataset.action) {
+    case 'edit-record': showRecordForm(record); break;
+    case 'delete-record': deleteRecord(record); break;
+    default: break;
+  }
 });
 
 // ----- نموذج المعالجة -----
 function showRecordForm(record = null) {
   hideError(recordError);
+  hideConflict();
   recordForm.reset();
+
+  const apTs = record && record.appointment && record.appointment.toDate ? record.appointment : null;
+  editingRecord = record
+    ? { id: record.id, originalMinute: apTs ? minuteOf(apTs.toDate()) : null }
+    : null;
 
   $('record-id').value = record ? record.id : '';
   $('record-form-title').textContent = record ? 'تعديل المعالجة' : 'معالجة جديدة';
@@ -664,17 +968,17 @@ function showRecordForm(record = null) {
     $('paid').value = isNum(record.paid) ? record.paid : '';
     $('currency').value = record.currency || '$';
     $('record-note').value = record.note || '';
-    $('appointment-date').value = record.appointment && record.appointment.toDate
-      ? toLocalInput(record.appointment.toDate())
-      : toLocalInput(new Date());
+    $('appointment-date').value = apTs ? toLocalInput(apTs.toDate()) : toLocalInput(new Date());
   } else {
-    $('appointment-date').value = toLocalInput(new Date());
+    $('appointment-date').value = toLocalInput(roundUpMinutes(new Date(), 5));
   }
 
   recordForm.classList.remove('hidden');
   addRecordBtn.classList.add('hidden');
   recordForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
   setTimeout(() => $('treatment-type').focus({ preventScroll: true }), 250);
+
+  if (!record) liveCheck();
 }
 
 function hideRecordForm() {
@@ -682,6 +986,9 @@ function hideRecordForm() {
   addRecordBtn.classList.remove('hidden');
   recordForm.reset();
   hideError(recordError);
+  hideConflict();
+  editingRecord = null;
+  liveCheckToken++;
 }
 
 addRecordBtn.addEventListener('click', () => showRecordForm());
@@ -708,30 +1015,49 @@ recordForm.addEventListener('submit', async (e) => {
   if (Number.isNaN(cost) || cost < 0) { showError(recordError, 'أدخل تكلفة صحيحة.'); return; }
   if (Number.isNaN(paid) || paid < 0) { showError(recordError, 'أدخل مبلغاً مدفوعاً صحيحاً.'); return; }
   if (paid > cost) { showError(recordError, 'المبلغ المدفوع أكبر من التكلفة.'); return; }
+  if (!appointmentInput) { showError(recordError, 'اختر موعد المعالجة.'); return; }
 
-  const appointment = appointmentInput
-    ? firebase.firestore.Timestamp.fromDate(new Date(appointmentInput))
-    : firebase.firestore.Timestamp.now();
-
-  const payload = { treatmentType, cost, paid, currency, note, appointment };
-  const recordsRef = db.collection('patients').doc(currentPatient.id).collection('records');
+  const appointmentDate = new Date(appointmentInput);
+  const timeChanged = !editingRecord || editingRecord.originalMinute !== minuteOf(appointmentDate);
 
   setLoading(recordSaveBtn, true);
   try {
+    // 1) التحقق من تعارض المواعيد (لكل المرضى)
+    if (timeChanged) {
+      let result;
+      try {
+        result = await checkAppointment(appointmentDate, currentIgnore());
+      } catch (error) {
+        console.error('Conflict check failed:', error);
+        showErrorHtml(
+          recordError,
+          error.code === 'failed-precondition'
+            ? indexHelpHtml(error)
+            : 'تعذّر التحقق من توفر الموعد. تحقق من الاتصال ثم أعد المحاولة.'
+        );
+        return;
+      }
+      if (result.conflicts.length) {
+        renderConflict(result.conflicts, result.suggestion);
+        conflictBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+    }
+    hideConflict();
+
+    // 2) حفظ المعالجة
+    const recordsRef = db.collection('patients').doc(currentPatient.id).collection('records');
+    const payload = { treatmentType, cost, paid, currency, note };
+    if (timeChanged) payload.appointment = TS.fromDate(appointmentDate);
+
     if (recordId) {
-      // عند التعديل نحذف حقل الدفعات القديم (النصي) لأنه استُبدل بحقل رقمي
-      await recordsRef.doc(recordId).update({
-        ...payload,
-        payments: firebase.firestore.FieldValue.delete()
-      });
+      await recordsRef.doc(recordId).update({ ...payload, payments: FV.delete() });
       showToast('تم تحديث المعالجة', 'success');
     } else {
-      await recordsRef.add({
-        ...payload,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      await recordsRef.add({ ...payload, createdAt: FV.serverTimestamp() });
       showToast('تمت إضافة المعالجة', 'success');
     }
+
     hideRecordForm();
   } catch (error) {
     console.error(error);
@@ -750,7 +1076,8 @@ async function deleteRecord(record) {
   if (!ok || !currentPatient) return;
 
   try {
-    await db.collection('patients').doc(currentPatient.id).collection('records').doc(record.id).delete();
+    const ref = db.collection('patients').doc(currentPatient.id).collection('records').doc(record.id);
+    await ref.delete();
     showToast('تم حذف المعالجة', 'success');
   } catch (error) {
     console.error(error);

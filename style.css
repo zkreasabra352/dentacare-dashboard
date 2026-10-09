@@ -786,3 +786,131 @@ input[type="datetime-local"] { text-align: right; min-width: 0; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* =========================================================
+   إضافات: جدول المواعيد، تعارض المواعيد
+   ========================================================= */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- جدول المواعيد ---------- */
+.schedule {
+  margin-bottom: 22px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+
+.schedule-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.schedule-title { display: flex; align-items: center; gap: 10px; }
+.schedule-title h2 { font-size: 17px; font-weight: 700; }
+.schedule-title h2 i { color: var(--primary); margin-inline-start: 4px; }
+.schedule-nav { display: flex; align-items: center; gap: 6px; }
+
+.schedule-date-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 0;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border-strong);
+}
+.schedule-date-row strong { font-size: 15px; font-weight: 700; }
+.schedule-date-row input {
+  width: auto;
+  min-height: 40px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border-radius: 10px;
+}
+
+.schedule-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
+
+.schedule-empty {
+  text-align: center;
+  padding: 22px 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.schedule-empty i { display: block; font-size: 26px; color: var(--primary); margin-bottom: 6px; }
+
+.schedule-row {
+  display: grid;
+  grid-template-columns: 82px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-inline-start: 4px solid var(--primary);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.schedule-row:hover { border-color: var(--primary); }
+.schedule-row.past { opacity: 0.55; border-inline-start-color: var(--border-strong); }
+.schedule-row.next { background: var(--primary-soft); border-color: var(--primary); }
+
+.slot-time { font-size: 14px; font-weight: 800; color: var(--primary); direction: ltr; text-align: right; line-height: 1.3; }
+.slot-body { min-width: 0; }
+.slot-body h4 {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-body p {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.slot-tag {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.slot-tag.next-tag { background: var(--primary); color: var(--on-primary); }
+.slot-tag.due-tag { background: var(--danger-soft); color: var(--danger); }
+
+/* ---------- تعارض المواعيد ---------- */
+.conflict-box {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.8;
+}
+.conflict-box.info { background: var(--warning-soft); border-color: var(--warning); }
+.conflict-box > strong { display: block; color: var(--danger); margin-bottom: 2px; }
+.conflict-box ul { list-style: none; margin: 4px 0 8px; }
+.conflict-box li b { color: var(--text); }
+.conflict-box .btn { margin-top: 4px; }
+.conflict-box a { color: var(--primary); text-decoration: underline; word-break: break-all; }
+
+@media (max-width: 380px) {
+  .schedule-row { grid-template-columns: 70px 1fr auto; padding: 10px; }
+}
